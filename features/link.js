@@ -32,36 +32,42 @@ function checkUserAccount(user) {
 	return db.getUserKeyAsync(user.id)
 		.then(key => {
 			if (! key) throw new Error('no key');
-			return gw2.request('/v2/account', key)
+			return gw2.request('/v2/account', key);
 		})
 		.then(account => {
 			var in_guild = (account.guilds.indexOf(guild_id) > -1);
-			return db.setUserAccountAsync(user.id, account).then(() => {
-				var promises = [];
-				bot.guilds.forEach(server => {
-					var add_roles = [];
-					var del_roles = [];
-					var guser = server.members.get(user.id);
-					if (! guser) return;
-					if (world_role_name) {
-						var world_role = server.roles.find('name', world_role_name);
-						if (account.world !== world_id && guser.roles.has(world_role.id))
-							del_roles.push(world_role);
-						else if (account.world === world_id && ! guser.roles.has(world_role.id))
-							add_roles.push(world_role);
-					}
-					if (guild_role_name) {
-						var guild_role = server.roles.find('name', guild_role_name);
-						if (in_guild && ! guser.roles.has(guild_role.id))
-							add_roles.push(guild_role);
-						else if (guser.roles.has(guild_role.id) && ! in_guild)
-							del_roles.push(guild_role);
-					}
-					if (add_roles.length > 0) promises.push(guser.addRoles(add_roles));
-					if (del_roles.length > 0) promises.push(guser.removeRoles(del_roles));
+			return gw2.request('/v2/wvw/matches/overview?world='+world_id, null, null, { ttl: 5000 })
+				.then(matchOverview => {
+					return getWorlds(matchOverview);
+				})
+				.then(worlds => {
+					return db.setUserAccountAsync(user.id, account).then(() => {
+						var promises = [];
+						bot.guilds.forEach(server => {
+							var add_roles = [];
+							var del_roles = [];
+							var guser = server.members.get(user.id);
+							if (! guser) return;
+							if (world_role_name) {
+								var world_role = server.roles.find('name', world_role_name);
+								if (! worlds.includes(account.world) && guser.roles.has(world_role.id))
+									del_roles.push(world_role);
+								else if (worlds.includes(account.world) && ! guser.roles.has(world_role.id))
+									add_roles.push(world_role);
+							}
+							if (guild_role_name) {
+								var guild_role = server.roles.find('name', guild_role_name);
+								if (in_guild && ! guser.roles.has(guild_role.id))
+									add_roles.push(guild_role);
+								else if (guser.roles.has(guild_role.id) && ! in_guild)
+									del_roles.push(guild_role);
+							}
+							if (add_roles.length > 0) promises.push(guser.addRoles(add_roles));
+							if (del_roles.length > 0) promises.push(guser.removeRoles(del_roles));
+						});
+						return Promise.all(promises);
+					});
 				});
-				return Promise.all(promises);
-			});
 		})
 		.catch(err => {
 			if (err.message === 'endpoint requires authentication' || err.message === 'invalid key') {
@@ -173,6 +179,16 @@ function initServer(server) {
 		}));
 	}
 	return Promise.all(promises);
+}
+
+function getWorlds(matchOverview) {
+	var colors = Object.keys(matchOverview.all_worlds);
+	for (var c in colors) {
+		var color = colors[c];
+		if (matchOverview.all_worlds[color].includes(world_id)) {
+			return matchOverview.all_worlds[color];
+		}
+	}
 }
 
 gw2.on('/v2/account', (account, key, from_cache) => {
